@@ -247,6 +247,8 @@ session({
   text: string,      // Required - message to send
   mode: string,      // Required - "message" | "new" | "compact" | "fork"
   agent?: string     // Optional - target agent name
+  directory?: string // Optional - target project directory (defaults to current)
+  async?: boolean    // Optional - send first prompt without waiting
 })
 ```
 
@@ -402,9 +404,11 @@ This creates **structured collaboration** rather than chaotic multi-agent interf
 
 | Argument | Type   | Required | Description                                                       |
 | -------- | ------ | -------- | ----------------------------------------------------------------- |
-| `text`   | string | ✅ Yes   | Message to send                                                   |
-| `mode`   | enum   | ✅ Yes   | Operation mode: `"message"` \| `"new"` \| `"compact"` \| `"fork"` |
-| `agent`  | string | ❌ No    | Target agent name (defaults to current agent)                     |
+| `text`      | string  | ✅ Yes   | Message to send                                                   |
+| `mode`      | enum    | ✅ Yes   | Operation mode: `"message"` \| `"new"` \| `"compact"` \| `"fork"` |
+| `agent`     | string  | ❌ No    | Target agent name (defaults to current agent)                     |
+| `directory` | string  | ❌ No    | Project directory for the session (defaults to current session)   |
+| `async`     | boolean | ❌ No    | Send first prompt without waiting (new/fork only)                 |
 
 **Returns:** Status message describing the operation
 

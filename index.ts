@@ -164,16 +164,24 @@ export const SessionPlugin: Plugin = async (ctx) => {
     modelID: string
     agent?: string
     text: string
+    directory: string
   }
 
   type CompactionState = {
     phase: "compacting"
     agent?: string
     text: string
+    directory: string
+  }
+
+  type PendingMessage = {
+    agent?: string
+    text: string
+    directory: string
   }
 
   // Store pending messages for agent relay communication (message mode)
-  const pendingMessages = new Map<string, { agent?: string; text: string }>()
+  const pendingMessages = new Map<string, PendingMessage>()
 
   // Store pending compaction requests (compact mode)
   const pendingCompactions = new Map<string, CompactionRequest>()
@@ -182,28 +190,6 @@ export const SessionPlugin: Plugin = async (ctx) => {
   const activeCompactions = new Map<string, CompactionState>()
 
   return {
-    // Hook: Before tool execution - save args for message mode
-    "tool.execute.before": async (input, output) => {
-      if (input.tool === "session") {
-        const args = output.args as {
-          mode: string
-          text: string
-          agent?: string
-        }
-
-        if (args.mode === "message") {
-          // Store message for session.idle handler
-          pendingMessages.set(input.sessionID, {
-            agent: args.agent,
-            text: args.text,
-          })
-        }
-
-        // Note: Compact mode storage happens in tool.execute()
-        // No need to track here since we're not using tool.execute.after
-      }
-    },
-
     // Hook: Listen for session.idle and session.compacted events
     event: async ({ event }) => {
       // Type guard for events with sessionID
@@ -216,18 +202,19 @@ export const SessionPlugin: Plugin = async (ctx) => {
       // ===== Handle session.idle (both message and compact modes) =====
       if (event.type === "session.idle") {
         // MESSAGE MODE: Send pending message
-        const pendingMessage = pendingMessages.get(sessionID)
-        if (pendingMessage) {
-          pendingMessages.delete(sessionID)
+          const pendingMessage = pendingMessages.get(sessionID)
+          if (pendingMessage) {
+            pendingMessages.delete(sessionID)
 
-          try {
-            await ctx.client.session.prompt({
-              path: { id: sessionID },
-              body: {
-                agent: pendingMessage.agent,
-                parts: [{ type: "text", text: pendingMessage.text }],
-              },
-            })
+            try {
+              await ctx.client.session.prompt({
+                path: { id: sessionID },
+                query: { directory: pendingMessage.directory },
+                body: {
+                  agent: pendingMessage.agent,
+                  parts: [{ type: "text", text: pendingMessage.text }],
+                },
+              })
           } catch (error) {
             // Silently fail - error handling could be added here if needed
           }
@@ -244,12 +231,14 @@ export const SessionPlugin: Plugin = async (ctx) => {
             phase: "compacting",
             agent: pendingCompaction.agent,
             text: pendingCompaction.text,
+            directory: pendingCompaction.directory,
           })
 
           // Start compaction (don't await - let it run async)
           ctx.client.session
             .summarize({
               path: { id: sessionID },
+              query: { directory: pendingCompaction.directory },
               body: {
                 providerID: pendingCompaction.providerID,
                 modelID: pendingCompaction.modelID,
@@ -278,6 +267,7 @@ export const SessionPlugin: Plugin = async (ctx) => {
           try {
             await ctx.client.session.prompt({
               path: { id: sessionID },
+              query: { directory: state.directory },
               body: {
                 agent: state.agent,
                 parts: [{ type: "text", text: state.text }],
@@ -374,14 +364,31 @@ EXAMPLES:
             .describe(
               "Primary agent name (e.g., 'build', 'plan') for agent switching",
             ),
+          directory: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "Project directory for the session (defaults to current session directory)",
+            ),
+          async: tool.schema
+            .boolean()
+            .optional()
+            .describe(
+              "Send the first prompt asynchronously without waiting for a response",
+            ),
         },
 
         async execute(args, toolCtx) {
           try {
+            const targetDirectory = args.directory || toolCtx.directory
             switch (args.mode) {
               case "message":
-                // Message is stored in tool.execute.before hook
-                // Will be sent after session.idle event fires
+                // Store message for session.idle handler
+                pendingMessages.set(toolCtx.sessionID, {
+                  agent: args.agent,
+                  text: args.text,
+                  directory: targetDirectory,
+                })
                 return args.agent
                   ? `Message sent to ${args.agent} agent. They will respond in this conversation.`
                   : "Message sent. Awaiting response in this conversation."
@@ -389,6 +396,7 @@ EXAMPLES:
               case "new":
                 // Create session via SDK for agent control
                 const newSession = await ctx.client.session.create({
+                  query: { directory: targetDirectory },
                   body: {
                     title: args.agent
                       ? `Session via ${args.agent}`
@@ -397,21 +405,36 @@ EXAMPLES:
                 })
 
                 // Send first message with specified agent
-                await ctx.client.session.prompt({
-                  path: { id: newSession.data.id },
-                  body: {
-                    agent: args.agent || "build",
-                    parts: [{ type: "text", text: args.text }],
-                  },
-                })
+                if (args.async) {
+                  await ctx.client.session.promptAsync({
+                    path: { id: newSession.data.id },
+                    query: { directory: targetDirectory },
+                    body: {
+                      agent: args.agent || "build",
+                      parts: [{ type: "text", text: args.text }],
+                    },
+                  })
+                } else {
+                  await ctx.client.session.prompt({
+                    path: { id: newSession.data.id },
+                    query: { directory: targetDirectory },
+                    body: {
+                      agent: args.agent || "build",
+                      parts: [{ type: "text", text: args.text }],
+                    },
+                  })
+                }
 
-                return `New session created with ${args.agent || "build"} agent (ID: ${newSession.data.id})`
+                return args.async
+                  ? `New session created with ${args.agent || "build"} agent (async prompt, ID: ${newSession.data.id})`
+                  : `New session created with ${args.agent || "build"} agent (ID: ${newSession.data.id})`
 
               case "compact":
                 try {
                   // Get session messages to determine current model
                   const msgs = await ctx.client.session.messages({
                     path: { id: toolCtx.sessionID },
+                    query: { directory: targetDirectory },
                   })
 
                   // Find last assistant message to get model info
@@ -434,6 +457,7 @@ EXAMPLES:
                   // Inject context marker that survives compaction
                   await ctx.client.session.prompt({
                     path: { id: toolCtx.sessionID },
+                    query: { directory: targetDirectory },
                     body: {
                       noReply: true,
                       parts: [
@@ -453,6 +477,7 @@ EXAMPLES:
                     modelID,
                     agent: args.agent,
                     text: args.text,
+                    directory: targetDirectory,
                   })
 
                   // Return immediately - compaction happens after agent finishes naturally
@@ -467,19 +492,34 @@ EXAMPLES:
                 // Use OpenCode's built-in fork API to copy message history
                 const forkedSession = await ctx.client.session.fork({
                   path: { id: toolCtx.sessionID },
+                  query: { directory: targetDirectory },
                   body: {},
                 })
 
                 // Send new message in forked session
-                await ctx.client.session.prompt({
-                  path: { id: forkedSession.data.id },
-                  body: {
-                    agent: args.agent || "build",
-                    parts: [{ type: "text", text: args.text }],
-                  },
-                })
+                if (args.async) {
+                  await ctx.client.session.promptAsync({
+                    path: { id: forkedSession.data.id },
+                    query: { directory: targetDirectory },
+                    body: {
+                      agent: args.agent || "build",
+                      parts: [{ type: "text", text: args.text }],
+                    },
+                  })
+                } else {
+                  await ctx.client.session.prompt({
+                    path: { id: forkedSession.data.id },
+                    query: { directory: targetDirectory },
+                    body: {
+                      agent: args.agent || "build",
+                      parts: [{ type: "text", text: args.text }],
+                    },
+                  })
+                }
 
-                return `Forked session with ${args.agent || "build"} agent - history preserved (ID: ${forkedSession.data.id})`
+                return args.async
+                  ? `Forked session with ${args.agent || "build"} agent (async prompt) - history preserved (ID: ${forkedSession.data.id})`
+                  : `Forked session with ${args.agent || "build"} agent - history preserved (ID: ${forkedSession.data.id})`
             }
           } catch (error) {
             const message =
