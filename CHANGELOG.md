@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+
+* add session utility tools (title, list, last message, project list)
+* support custom titles for new and forked sessions
+
 ## [1.0.0](https://github.com/malhashemi/opencode-sessions/compare/v0.0.14...v1.0.0) (2025-10-29)
 
 

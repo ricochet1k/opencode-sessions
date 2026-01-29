@@ -248,6 +248,7 @@ session({
   mode: string,      // Required - "message" | "new" | "compact" | "fork"
   agent?: string     // Optional - target agent name
   directory?: string // Optional - target project directory (defaults to current)
+  title?: string     // Optional - title for new/forked sessions
   async?: boolean    // Optional - send first prompt without waiting
 })
 ```
@@ -408,6 +409,7 @@ This creates **structured collaboration** rather than chaotic multi-agent interf
 | `mode`      | enum    | ✅ Yes   | Operation mode: `"message"` \| `"new"` \| `"compact"` \| `"fork"` |
 | `agent`     | string  | ❌ No    | Target agent name (defaults to current agent)                     |
 | `directory` | string  | ❌ No    | Project directory for the session (defaults to current session)   |
+| `title`     | string  | ❌ No    | Title for newly created or forked sessions                        |
 | `async`     | boolean | ❌ No    | Send first prompt without waiting (new/fork only)                 |
 
 **Returns:** Status message describing the operation
@@ -420,6 +422,49 @@ This creates **structured collaboration** rather than chaotic multi-agent interf
 | `new`     | Yes                 | Yes             | No                | Phase transitions    |
 | `compact` | No                  | Yes             | Compressed        | Token optimization   |
 | `fork`    | Yes (child)         | Yes             | Yes               | Parallel exploration |
+
+### Tool: session_title
+
+Set the title for the current session (or a specific session).
+
+**Arguments:**
+
+| Argument    | Type   | Required | Description                                                      |
+| ----------- | ------ | -------- | ---------------------------------------------------------------- |
+| `title`     | string | ✅ Yes   | New session title                                                |
+| `sessionID` | string | ❌ No    | Target session ID (defaults to current session)                  |
+| `directory` | string | ❌ No    | Project directory for the session (defaults to current session)  |
+
+### Tool: session_list
+
+List sessions with their status.
+
+**Arguments:**
+
+| Argument    | Type   | Required | Description                                                      |
+| ----------- | ------ | -------- | ---------------------------------------------------------------- |
+| `directory` | string | ❌ No    | Project directory for listing sessions (defaults to current)     |
+
+### Tool: session_last_message
+
+Get the last message for a session.
+
+**Arguments:**
+
+| Argument    | Type   | Required | Description                                                      |
+| ----------- | ------ | -------- | ---------------------------------------------------------------- |
+| `sessionID` | string | ❌ No    | Target session ID (defaults to current session)                  |
+| `directory` | string | ❌ No    | Project directory for the session (defaults to current session)  |
+
+### Tool: project_list
+
+List available projects and directories.
+
+**Arguments:**
+
+| Argument    | Type   | Required | Description                                                      |
+| ----------- | ------ | -------- | ---------------------------------------------------------------- |
+| `directory` | string | ❌ No    | Project directory for listing projects (defaults to current)     |
 
 ---
 

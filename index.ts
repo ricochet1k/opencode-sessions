@@ -180,6 +180,16 @@ export const SessionPlugin: Plugin = async (ctx) => {
     directory: string
   }
 
+  const formatSessionStatus = (status?: { type: string; [key: string]: any }) => {
+    if (!status) return "unknown"
+    if (status.type === "retry") {
+      const attempt =
+        typeof status.attempt === "number" ? ` (attempt ${status.attempt})` : ""
+      return `retry${attempt}`
+    }
+    return status.type
+  }
+
   // Store pending messages for agent relay communication (message mode)
   const pendingMessages = new Map<string, PendingMessage>()
 
@@ -370,6 +380,10 @@ EXAMPLES:
             .describe(
               "Project directory for the session (defaults to current session directory)",
             ),
+          title: tool.schema
+            .string()
+            .optional()
+            .describe("Title for newly created or forked sessions"),
           async: tool.schema
             .boolean()
             .optional()
@@ -398,9 +412,9 @@ EXAMPLES:
                 const newSession = await ctx.client.session.create({
                   query: { directory: targetDirectory },
                   body: {
-                    title: args.agent
-                      ? `Session via ${args.agent}`
-                      : "New session",
+                    title:
+                      args.title ||
+                      (args.agent ? `Session via ${args.agent}` : "New session"),
                   },
                 })
 
@@ -496,6 +510,14 @@ EXAMPLES:
                   body: {},
                 })
 
+                if (args.title) {
+                  await ctx.client.session.update({
+                    path: { id: forkedSession.data.id },
+                    query: { directory: targetDirectory },
+                    body: { title: args.title },
+                  })
+                }
+
                 // Send new message in forked session
                 if (args.async) {
                   await ctx.client.session.promptAsync({
@@ -534,6 +556,202 @@ EXAMPLES:
             })
 
             // Return error to agent
+            return `Error: ${message}`
+          }
+        },
+      }),
+      session_title: tool({
+        description: "Set the title for the current session",
+        args: {
+          title: tool.schema.string().describe("New title for the session"),
+          sessionID: tool.schema
+            .string()
+            .optional()
+            .describe("Target session ID (defaults to current session)"),
+          directory: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "Project directory for the session (defaults to current session directory)",
+            ),
+        },
+        async execute(args, toolCtx) {
+          try {
+            const targetDirectory = args.directory || toolCtx.directory
+            const targetSessionID = args.sessionID || toolCtx.sessionID
+
+            await ctx.client.session.update({
+              path: { id: targetSessionID },
+              query: { directory: targetDirectory },
+              body: { title: args.title },
+            })
+
+            return `Session title updated (ID: ${targetSessionID})`
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error)
+
+            await ctx.client.tui.showToast({
+              body: {
+                message: `Session title update failed: ${message}`,
+                variant: "error",
+              },
+            })
+
+            return `Error: ${message}`
+          }
+        },
+      }),
+      session_list: tool({
+        description: "List sessions with their status",
+        args: {
+          directory: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "Project directory for listing sessions (defaults to current session directory)",
+            ),
+        },
+        async execute(args, toolCtx) {
+          try {
+            const targetDirectory = args.directory || toolCtx.directory
+
+            const [sessions, status] = await Promise.all([
+              ctx.client.session.list({
+                query: { directory: targetDirectory },
+              }),
+              ctx.client.session.status({
+                query: { directory: targetDirectory },
+              }),
+            ])
+
+            if (!sessions.data.length) {
+              return "No sessions found."
+            }
+
+            const statusMap = status.data || {}
+            const sortedSessions = [...sessions.data].sort(
+              (a, b) => b.time.updated - a.time.updated,
+            )
+
+            const lines = sortedSessions.map((session) => {
+              const sessionStatus = formatSessionStatus(statusMap[session.id])
+              return `${session.id} ${sessionStatus} ${session.title} (${session.directory})`
+            })
+
+            return lines.join("\n")
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error)
+
+            await ctx.client.tui.showToast({
+              body: {
+                message: `Session list failed: ${message}`,
+                variant: "error",
+              },
+            })
+
+            return `Error: ${message}`
+          }
+        },
+      }),
+      session_last_message: tool({
+        description: "Get the last message for a session",
+        args: {
+          sessionID: tool.schema
+            .string()
+            .optional()
+            .describe("Target session ID (defaults to current session)"),
+          directory: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "Project directory for the session (defaults to current session directory)",
+            ),
+        },
+        async execute(args, toolCtx) {
+          try {
+            const targetDirectory = args.directory || toolCtx.directory
+            const targetSessionID = args.sessionID || toolCtx.sessionID
+
+            const messages = await ctx.client.session.messages({
+              path: { id: targetSessionID },
+              query: { directory: targetDirectory },
+            })
+
+            if (!messages.data.length) {
+              return "No messages found."
+            }
+
+            const sortedMessages = [...messages.data].sort(
+              (a, b) => a.info.time.created - b.info.time.created,
+            )
+            const lastMessage = sortedMessages[sortedMessages.length - 1]
+
+            const textParts = lastMessage.parts
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+
+            const text = textParts.length
+              ? textParts.join("\n")
+              : "(no text content)"
+
+            return `Last message (${lastMessage.info.role}) [${lastMessage.info.id}]:\n${text}`
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error)
+
+            await ctx.client.tui.showToast({
+              body: {
+                message: `Session message lookup failed: ${message}`,
+                variant: "error",
+              },
+            })
+
+            return `Error: ${message}`
+          }
+        },
+      }),
+      project_list: tool({
+        description: "List available projects and directories",
+        args: {
+          directory: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "Project directory for listing projects (defaults to current session directory)",
+            ),
+        },
+        async execute(args, toolCtx) {
+          try {
+            const targetDirectory = args.directory || toolCtx.directory
+            const projects = await ctx.client.project.list({
+              query: { directory: targetDirectory },
+            })
+
+            if (!projects.data.length) {
+              return "No projects found."
+            }
+
+            const lines = projects.data.map((project) => {
+              const isCurrent = project.id === ctx.project.id
+              const marker = isCurrent ? "*" : " "
+              const vcs = project.vcs ? ` (${project.vcs})` : ""
+              return `${marker} ${project.worktree} [${project.id}]${vcs}`
+            })
+
+            return lines.join("\n")
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error)
+
+            await ctx.client.tui.showToast({
+              body: {
+                message: `Project list failed: ${message}`,
+                variant: "error",
+              },
+            })
+
             return `Error: ${message}`
           }
         },
