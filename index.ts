@@ -467,11 +467,11 @@ EXAMPLES:
               case "message":
                 // Store message for session.idle handler
                 pendingMessages.set(toolCtx.sessionID, {
-                  agent: args.agent,
-                  modelID: args.modelID,
-                  providerID: args.providerID,
-                  system: args.system,
-                  tools: args.tools,
+                  agent: args.agent || inheritedAgent,
+                  modelID: args.modelID || inheritedModelID,
+                  providerID: args.providerID || inheritedProviderID,
+                  system: args.system || inheritedSystem,
+                  tools: args.tools || inheritedTools,
                   text: args.text,
                   directory: targetDirectory,
                 })
@@ -572,9 +572,9 @@ EXAMPLES:
                   pendingCompactions.set(toolCtx.sessionID, {
                     providerID,
                     modelID,
-                    agent: args.agent,
-                    system: args.system,
-                    tools: args.tools,
+                    agent: args.agent || inheritedAgent,
+                    system: args.system || inheritedSystem,
+                    tools: args.tools || inheritedTools,
                     text: args.text,
                     directory: targetDirectory,
                   })
