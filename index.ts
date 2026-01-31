@@ -163,6 +163,8 @@ export const SessionPlugin: Plugin = async (ctx) => {
     providerID: string
     modelID: string
     agent?: string
+    system?: string
+    tools?: string
     text: string
     directory: string
   }
@@ -170,12 +172,20 @@ export const SessionPlugin: Plugin = async (ctx) => {
   type CompactionState = {
     phase: "compacting"
     agent?: string
+    modelID?: string
+    providerID?: string
+    system?: string
+    tools?: string
     text: string
     directory: string
   }
 
   type PendingMessage = {
     agent?: string
+    modelID?: string
+    providerID?: string
+    system?: string
+    tools?: string
     text: string
     directory: string
   }
@@ -222,6 +232,17 @@ export const SessionPlugin: Plugin = async (ctx) => {
                 query: { directory: pendingMessage.directory },
                 body: {
                   agent: pendingMessage.agent,
+                  model:
+                    pendingMessage.modelID && pendingMessage.providerID
+                      ? {
+                          modelID: pendingMessage.modelID,
+                          providerID: pendingMessage.providerID,
+                        }
+                      : undefined,
+                  system: pendingMessage.system,
+                  tools: pendingMessage.tools
+                    ? JSON.parse(pendingMessage.tools)
+                    : undefined,
                   parts: [{ type: "text", text: pendingMessage.text }],
                 },
               })
@@ -240,6 +261,10 @@ export const SessionPlugin: Plugin = async (ctx) => {
           activeCompactions.set(sessionID, {
             phase: "compacting",
             agent: pendingCompaction.agent,
+            modelID: pendingCompaction.modelID,
+            providerID: pendingCompaction.providerID,
+            system: pendingCompaction.system,
+            tools: pendingCompaction.tools,
             text: pendingCompaction.text,
             directory: pendingCompaction.directory,
           })
@@ -280,6 +305,15 @@ export const SessionPlugin: Plugin = async (ctx) => {
               query: { directory: state.directory },
               body: {
                 agent: state.agent,
+                model:
+                  state.modelID && state.providerID
+                    ? {
+                        modelID: state.modelID,
+                        providerID: state.providerID,
+                      }
+                    : undefined,
+                system: state.system,
+                tools: state.tools ? JSON.parse(state.tools) : undefined,
                 parts: [{ type: "text", text: state.text }],
               },
             })
@@ -384,6 +418,22 @@ EXAMPLES:
             .string()
             .optional()
             .describe("Title for newly created or forked sessions"),
+          modelID: tool.schema
+            .string()
+            .optional()
+            .describe("Model ID for the session"),
+          providerID: tool.schema
+            .string()
+            .optional()
+            .describe("Provider ID for the session"),
+          system: tool.schema
+            .string()
+            .optional()
+            .describe("System instructions for the session"),
+          tools: tool.schema
+            .string()
+            .optional()
+            .describe("JSON string of tools permissions (e.g., '{\"read\": true}')"),
           async: tool.schema
             .boolean()
             .optional()
@@ -395,11 +445,33 @@ EXAMPLES:
         async execute(args, toolCtx) {
           try {
             const targetDirectory = args.directory || toolCtx.directory
+
+            // Get current session context (agent and model) to inherit if not provided
+            const msgs = await ctx.client.session.messages({
+              path: { id: toolCtx.sessionID },
+              query: { directory: toolCtx.directory },
+            })
+            const lastAssistant = msgs.data
+              .filter((m) => m.info.role === "assistant")
+              .pop()
+
+            const inheritedAgent = (lastAssistant?.info as any)?.agent
+            const inheritedModelID = (lastAssistant?.info as any)?.modelID
+            const inheritedProviderID = (lastAssistant?.info as any)?.providerID
+            const inheritedSystem = (lastAssistant?.info as any)?.system
+            const inheritedTools = (lastAssistant?.info as any)?.tools
+              ? JSON.stringify((lastAssistant?.info as any).tools)
+              : undefined
+
             switch (args.mode) {
               case "message":
                 // Store message for session.idle handler
                 pendingMessages.set(toolCtx.sessionID, {
                   agent: args.agent,
+                  modelID: args.modelID,
+                  providerID: args.providerID,
+                  system: args.system,
+                  tools: args.tools,
                   text: args.text,
                   directory: targetDirectory,
                 })
@@ -414,9 +486,15 @@ EXAMPLES:
                   body: {
                     title:
                       args.title ||
-                      (args.agent ? `Session via ${args.agent}` : "New session"),
+                      (args.agent || inheritedAgent
+                        ? `Session via ${args.agent || inheritedAgent}`
+                        : "New session"),
                   },
                 })
+
+                const agent = args.agent || inheritedAgent || "build"
+                const system = args.system || inheritedSystem
+                const tools = args.tools || inheritedTools
 
                 // Send first message with specified agent
                 if (args.async) {
@@ -424,7 +502,17 @@ EXAMPLES:
                     path: { id: newSession.data.id },
                     query: { directory: targetDirectory },
                     body: {
-                      agent: args.agent || "build",
+                      agent,
+                      model:
+                        args.modelID || inheritedModelID
+                          ? {
+                              modelID: args.modelID || inheritedModelID,
+                              providerID:
+                                args.providerID || inheritedProviderID,
+                            }
+                          : undefined,
+                      system,
+                      tools: tools ? JSON.parse(tools) : undefined,
                       parts: [{ type: "text", text: args.text }],
                     },
                   })
@@ -433,40 +521,35 @@ EXAMPLES:
                     path: { id: newSession.data.id },
                     query: { directory: targetDirectory },
                     body: {
-                      agent: args.agent || "build",
+                      agent,
+                      model:
+                        args.modelID || inheritedModelID
+                          ? {
+                              modelID: args.modelID || inheritedModelID,
+                              providerID:
+                                args.providerID || inheritedProviderID,
+                            }
+                          : undefined,
+                      system,
+                      tools: tools ? JSON.parse(tools) : undefined,
                       parts: [{ type: "text", text: args.text }],
                     },
                   })
                 }
 
                 return args.async
-                  ? `New session created with ${args.agent || "build"} agent (async prompt, ID: ${newSession.data.id})`
-                  : `New session created with ${args.agent || "build"} agent (ID: ${newSession.data.id})`
+                  ? `New session created with ${agent} agent (async prompt, ID: ${newSession.data.id})`
+                  : `New session created with ${agent} agent (ID: ${newSession.data.id})`
 
               case "compact":
                 try {
-                  // Get session messages to determine current model
-                  const msgs = await ctx.client.session.messages({
-                    path: { id: toolCtx.sessionID },
-                    query: { directory: targetDirectory },
-                  })
+                  // Use inherited or provided model info for compaction
+                  const providerID = args.providerID || inheritedProviderID
+                  const modelID = args.modelID || inheritedModelID
 
-                  // Find last assistant message to get model info
-                  const assistantMsgs = msgs.data.filter(
-                    (m) => m.info.role === "assistant",
-                  )
-                  const lastAssistant = assistantMsgs[assistantMsgs.length - 1]
-
-                  if (
-                    !lastAssistant ||
-                    lastAssistant.info.role !== "assistant"
-                  ) {
+                  if (!providerID || !modelID) {
                     return "Error: No assistant messages found in session. Cannot determine model for compaction."
                   }
-
-                  // Extract model info from last assistant message
-                  const providerID = lastAssistant.info.providerID
-                  const modelID = lastAssistant.info.modelID
 
                   // Inject context marker that survives compaction
                   await ctx.client.session.prompt({
@@ -490,6 +573,8 @@ EXAMPLES:
                     providerID,
                     modelID,
                     agent: args.agent,
+                    system: args.system,
+                    tools: args.tools,
                     text: args.text,
                     directory: targetDirectory,
                   })
@@ -518,13 +603,27 @@ EXAMPLES:
                   })
                 }
 
+                const forkedAgent = args.agent || inheritedAgent || "build"
+                const forkedSystem = args.system || inheritedSystem
+                const forkedTools = args.tools || inheritedTools
+
                 // Send new message in forked session
                 if (args.async) {
                   await ctx.client.session.promptAsync({
                     path: { id: forkedSession.data.id },
                     query: { directory: targetDirectory },
                     body: {
-                      agent: args.agent || "build",
+                      agent: forkedAgent,
+                      model:
+                        args.modelID || inheritedModelID
+                          ? {
+                              modelID: args.modelID || inheritedModelID,
+                              providerID:
+                                args.providerID || inheritedProviderID,
+                            }
+                          : undefined,
+                      system: forkedSystem,
+                      tools: forkedTools ? JSON.parse(forkedTools) : undefined,
                       parts: [{ type: "text", text: args.text }],
                     },
                   })
@@ -533,15 +632,25 @@ EXAMPLES:
                     path: { id: forkedSession.data.id },
                     query: { directory: targetDirectory },
                     body: {
-                      agent: args.agent || "build",
+                      agent: forkedAgent,
+                      model:
+                        args.modelID || inheritedModelID
+                          ? {
+                              modelID: args.modelID || inheritedModelID,
+                              providerID:
+                                args.providerID || inheritedProviderID,
+                            }
+                          : undefined,
+                      system: forkedSystem,
+                      tools: forkedTools ? JSON.parse(forkedTools) : undefined,
                       parts: [{ type: "text", text: args.text }],
                     },
                   })
                 }
 
                 return args.async
-                  ? `Forked session with ${args.agent || "build"} agent (async prompt) - history preserved (ID: ${forkedSession.data.id})`
-                  : `Forked session with ${args.agent || "build"} agent - history preserved (ID: ${forkedSession.data.id})`
+                  ? `Forked session with ${forkedAgent} agent (async prompt) - history preserved (ID: ${forkedSession.data.id})`
+                  : `Forked session with ${forkedAgent} agent - history preserved (ID: ${forkedSession.data.id})`
             }
           } catch (error) {
             const message =
