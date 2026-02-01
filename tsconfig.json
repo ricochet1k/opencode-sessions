@@ -1,9 +1,12 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2024",
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2024",
+      "DOM"
+    ],
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -16,6 +19,11 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["index.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "index.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

@@ -45,7 +45,7 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": "^1.1.41"
+    "@opencode-ai/plugin": "^1.1.48"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.1.41",
@@ -54,7 +54,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.1.41",
+    "@opencode-ai/sdk": "^1.1.48",
     "gray-matter": "^4.0.3"
   }
 }
